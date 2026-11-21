@@ -165,6 +165,14 @@ any of them is its own ticket.
   "Per-case annotations". The format would need the same per-entry alternative slot the
   asserted status already has.
 
+- **Case `02` is not carried.** `02-oil-boiler-basement` repeats the adapter's few-shot example
+  (`snuggExamples` in `src/examples.ts`): 97% of its 8-word phrases appear in the example, which
+  was later extended past it, so the two are no longer byte-identical. The prompt shows the model
+  that example's answer, so grading the case measures copying (docs/implementation/18's
+  correction). The spike scorer excludes it at grading time (`CONTAMINATED_SLUGS` in `score.mjs`);
+  the first migration carried it anyway, and the loader now refuses a corpus that does. The spike
+  transcript stays where it is, and the corpus holds 13 cases.
+
 ## Vocabulary coverage
 
 The live schema's field vocabulary is broader than the pilot subset the spike annotated, so

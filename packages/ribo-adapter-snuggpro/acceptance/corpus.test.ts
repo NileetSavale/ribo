@@ -60,6 +60,19 @@ const spikeSlugs = readdirSync(join(SPIKE_DIR, "ground-truth"))
   .sort();
 
 /**
+ * The spike cases the corpus does not carry, and why. `02-oil-boiler-basement` repeats the
+ * adapter's few-shot example (`snuggExamples`): the prompt shows the model its answer, so grading
+ * it measures copying. The spike scorer excludes it the same way (`CONTAMINATED_SLUGS` in
+ * `score.mjs`, docs/implementation/18), and the loader refuses a corpus that carries it.
+ */
+const NOT_GRADED = new Map([
+  ["02-oil-boiler-basement", "repeats the few-shot example in snuggExamples"],
+]);
+
+/** The spike cases the corpus carries. */
+const gradedSlugs = spikeSlugs.filter((slug) => !NOT_GRADED.has(slug));
+
+/**
  * Load the corpus, failing with the remedy when the schema artifact has not been built yet —
  * `./check.sh` builds before it tests, so only a bare local run sees this.
  */
@@ -144,13 +157,41 @@ const deriveExampleFields = (fields: unknown): Record<string, unknown> => {
 
 test("the migrated corpus loads through loadCorpus from @azx/ribo-cli's public entry", () => {
   const corpus = loadCorpusOrFail();
-  expect(corpus.cases).toHaveLength(spikeSlugs.length);
-  expect(corpus.cases.map((c) => c.id)).toEqual(spikeSlugs);
+  expect(corpus.cases).toHaveLength(gradedSlugs.length);
+  expect(corpus.cases.map((c) => c.id)).toEqual(gradedSlugs);
   expect(corpus.manifest.provenance).toBe("real");
   for (const testCase of corpus.cases) {
     expect(testCase.inputs).toHaveLength(1);
     expect(testCase.inputs[0]?.kind).toBe("transcript");
     expect(testCase.inputs[0]?.file).toBe("input.txt");
+  }
+});
+
+test("a spike case that repeats the few-shot example is refused, not graded", () => {
+  const dir = mkdtempSync(join(tmpdir(), "snugg-corpus-"));
+  try {
+    cpSync(CORPUS_DIR, dir, { recursive: true });
+    for (const slug of NOT_GRADED.keys()) {
+      cpSync(join(SPIKE_DIR, "transcripts", `${slug}.txt`), join(dir, slug, "input.txt"));
+      writeFileSync(
+        join(dir, slug, "case.json"),
+        JSON.stringify({
+          id: slug,
+          inputs: [{ file: "input.txt", kind: "transcript" }],
+          expected: {},
+        }),
+      );
+    }
+    cpSync(fileURLToPath(ARTIFACT_URL), join(dir, "extraction.schema.json"));
+    const manifest = JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8")) as {
+      schema: string;
+    };
+    manifest.schema = "extraction.schema.json";
+    writeFileSync(join(dir, "manifest.json"), JSON.stringify(manifest));
+    expect(() => loadCorpus(dir)).toThrow(CorpusError);
+    expect(() => loadCorpus(dir)).toThrow(/02-oil-boiler-basement.*few-shot example/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
