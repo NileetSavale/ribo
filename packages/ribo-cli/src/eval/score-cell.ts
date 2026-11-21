@@ -130,7 +130,10 @@ const listMatches = (
  *
  * An enum's or a literal's members come from the schema, so an expectation
  * naming no member the schema declares cannot be compared at all: the cell
- * is unscorable, with the reason, rather than a quiet wrong.
+ * is unscorable, with the reason, rather than a quiet wrong. A collection
+ * leaf's expectation is an ordinal-keyed object, so each of its elements is
+ * checked against the members, never the object itself — the object is no
+ * member, and comparing it would make every collection enum unscorable.
  * @param leaf - The leaf's inventory entry.
  * @param expectation - The expectation.
  * @returns Whether the expectation is comparable.
@@ -142,8 +145,12 @@ const isComparable = (
   if (leaf.kind !== "enum" && leaf.kind !== "literal") return true;
   const members = leaf.values ?? [];
   if (members.length === 0) return true;
+  const isMember = (candidate: unknown): boolean =>
+    members.some((member) => sameAnswer(candidate, member));
   const candidates = [expectation.value, ...expectation.alternatives];
-  return candidates.some((candidate) => members.some((member) => sameAnswer(candidate, member)));
+  return candidates.some((candidate) =>
+    leaf.inArray ? ordinalValues(candidate).every(isMember) : isMember(candidate),
+  );
 };
 
 /**

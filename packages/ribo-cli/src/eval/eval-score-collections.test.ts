@@ -75,3 +75,58 @@ test("a declared-absent collection leaf with nothing produced is correct", () =>
   const cell = cellOf({ "equipment.type": { status: "declared-absent" } }, {});
   expect(cell.verdict).toBe("correct");
 });
+
+/** A collection whose leaf is an enum: the shape every Snugg collection enum takes. */
+const ENUM_SCHEMA = z.object({
+  equipment: z.array(z.object({ type: z.enum(["Furnace", "Boiler", "Heat pump"]) })),
+});
+
+/** The cell the collection enum leaf carries. */
+const enumCellOf = (expected: ScoreCase["expected"], produced: EvalJsonValue) => {
+  const score = scoreEvalOverSchema({
+    schema: ENUM_SCHEMA,
+    cases: [{ id: "c", expected, defaults: [] }],
+    results: [extracted("c", produced)],
+  });
+  const cell = score.cases[0]?.cells["equipment.type"];
+  if (cell === undefined) throw new Error("no cell");
+  return cell;
+};
+
+test("a collection enum's ordinal-keyed expectation of members is judged, not unscorable", () => {
+  const cell = enumCellOf(
+    { "equipment.type": { status: "asserted", value: { "0": "Furnace", "1": "Boiler" } } },
+    { equipment: [{ type: envelope("Furnace") }, { type: envelope("Boiler") }] },
+  );
+  expect(cell.verdict).toBe("correct");
+});
+
+test("a collection enum producing a different member is wrong", () => {
+  const cell = enumCellOf(
+    { "equipment.type": { status: "asserted", value: { "0": "Furnace", "1": "Boiler" } } },
+    { equipment: [{ type: envelope("Furnace") }, { type: envelope("Heat pump") }] },
+  );
+  expect(cell.verdict).toBe("wrong");
+});
+
+test("a collection enum expectation naming a non-member stays unscorable", () => {
+  const cell = enumCellOf(
+    { "equipment.type": { status: "asserted", value: { "0": "Furnace", "1": "Stove" } } },
+    { equipment: [{ type: envelope("Furnace") }, { type: envelope("Boiler") }] },
+  );
+  expect(cell).toMatchObject({ verdict: "unscorable", reason: "incomparable-expectation" });
+});
+
+test("a collection enum whose alternative names only members is comparable", () => {
+  const cell = enumCellOf(
+    {
+      "equipment.type": {
+        status: "asserted",
+        value: { "0": "Furnace", "1": "Stove" },
+        alternatives: [{ "0": "Furnace", "1": "Boiler" }],
+      },
+    },
+    { equipment: [{ type: envelope("Furnace") }, { type: envelope("Boiler") }] },
+  );
+  expect(cell.verdict).toBe("correct");
+});
