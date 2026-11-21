@@ -347,6 +347,71 @@ test("a groupInstructions key that names no group is refused, naming the key and
   expect(message).toContain("service");
 });
 
+test("a case whose input is a few-shot example is refused, naming the case and the example", () => {
+  const dir = brokenCorpus((root) => {
+    editJson(path.join(root, "manifest.json"), (document) => {
+      const prompt = document["prompt"] as Record<string, unknown>;
+      const examples = prompt["examples"] as Record<string, unknown>[];
+      examples.push({
+        transcript: readFileSync(path.join(root, "spoken-note", "input.txt"), "utf8"),
+        fields: { "frame.material": "steel" },
+      });
+    });
+  });
+  const message = refusal(dir);
+  expect(message).toContain("spoken-note");
+  expect(message).toContain("input.txt");
+  expect(message).toContain("prompt.examples[1]");
+});
+
+test("whitespace differences do not hide a case that repeats a few-shot example", () => {
+  const dir = brokenCorpus((root) => {
+    const input = readFileSync(path.join(root, "spoken-note", "input.txt"), "utf8");
+    editJson(path.join(root, "manifest.json"), (document) => {
+      const prompt = document["prompt"] as Record<string, unknown>;
+      prompt["examples"] = [
+        { transcript: `  ${input.trim().replace(/ /g, "\n  ")}  `, fields: {} },
+      ];
+    });
+  });
+  const message = refusal(dir);
+  expect(message).toContain("spoken-note");
+  expect(message).toContain("prompt.examples[0]");
+});
+
+test("an example that was extended past a case still repeats it", () => {
+  const dir = brokenCorpus((root) => {
+    const input = readFileSync(path.join(root, "spoken-note", "input.txt"), "utf8");
+    editJson(path.join(root, "manifest.json"), (document) => {
+      const prompt = document["prompt"] as Record<string, unknown>;
+      prompt["examples"] = [
+        {
+          transcript: `${input} Upstairs the customer also left a carbon road frame for a fitting.`,
+          fields: {},
+        },
+      ];
+    });
+  });
+  const message = refusal(dir);
+  expect(message).toContain("spoken-note");
+  expect(message).toContain("8-word phrases");
+});
+
+test("an example that only shares words with a case does not refuse the corpus", () => {
+  const dir = brokenCorpus((root) => {
+    editJson(path.join(root, "manifest.json"), (document) => {
+      const prompt = document["prompt"] as Record<string, unknown>;
+      prompt["examples"] = [
+        {
+          transcript: "Customer brought in a steel frame bicycle, serial number BW-1000.",
+          fields: {},
+        },
+      ];
+    });
+  });
+  expect(loadCorpus(dir).cases).toHaveLength(3);
+});
+
 test("a schema with no groups refuses every groupInstructions key", () => {
   const dir = brokenCorpus((root) => {
     writeFileSync(

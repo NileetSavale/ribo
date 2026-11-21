@@ -232,6 +232,69 @@ const checkGroupInstructions = (manifest: CorpusManifest, groupKeys: readonly st
   );
 };
 
+/** The length, in words, of the phrases the leak check compares. */
+const LEAK_PHRASE_WORDS = 8;
+
+/**
+ * The share of a case input's phrases found in one few-shot example at which
+ * the input counts as a repeat of it. Measured on the Snugg corpus: the case
+ * the doc 18 correction names shares 0.97 of its phrases with the worked
+ * example, every other case of every corpus in the repo shares 0.
+ */
+const LEAK_SHARE = 0.5;
+
+/** A text's words, lowercased, with punctuation and whitespace dropped. */
+const leakWords = (text: string): string[] => text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+
+/**
+ * A text's phrases: every run of `LEAK_PHRASE_WORDS` consecutive words. A text
+ * shorter than one phrase is its one whole-text phrase.
+ */
+const leakPhrases = (text: string): Set<string> => {
+  const words = leakWords(text);
+  if (words.length < LEAK_PHRASE_WORDS) return new Set([words.join(" ")]);
+  const phrases = new Set<string>();
+  for (let start = 0; start + LEAK_PHRASE_WORDS <= words.length; start += 1) {
+    phrases.add(words.slice(start, start + LEAK_PHRASE_WORDS).join(" "));
+  }
+  return phrases;
+};
+
+/**
+ * Refuse a case whose transcript or text input repeats one of the manifest's
+ * few-shot examples. The prompt shows the model an example's exact answer, so
+ * a case that repeats the example grades copying, not extraction, and
+ * inflates every aggregate it enters. A repeat is found by shared phrases, not
+ * equality: an example later extended or trimmed, or reformatted, still
+ * repeats the case. Document inputs are not compared here: their text exists
+ * only after transcription.
+ */
+const checkExampleLeaks = (manifest: CorpusManifest, cases: readonly LoadedCase[]): void => {
+  const examples = (manifest.prompt.examples ?? []).map((example) =>
+    leakPhrases(example.transcript),
+  );
+  if (examples.length === 0) return;
+  for (const entry of cases) {
+    for (const input of entry.inputs) {
+      if (input.kind === "document") continue;
+      const phrases = leakPhrases(input.text);
+      for (const [index, example] of examples.entries()) {
+        let shared = 0;
+        for (const phrase of phrases) if (example.has(phrase)) shared += 1;
+        const share = shared / phrases.size;
+        if (share < LEAK_SHARE) continue;
+        throw new CorpusError(
+          `the corpus case "${entry.id}"'s input "${input.file}" repeats the manifest's few-shot ` +
+            `example ${index + 1} (prompt.examples[${index}]): ${Math.round(share * 100)}% of its ` +
+            `${LEAK_PHRASE_WORDS}-word phrases appear in the example — the prompt shows the model ` +
+            `that example's answer, so this case would measure copying, not extraction (fix: drop ` +
+            `the case, or replace the example with a transcript no case repeats)`,
+        );
+      }
+    }
+  }
+};
+
 /** Refuse an expected leaf path the schema does not declare. */
 const checkExpectedLeaves = (
   caseFile: CorpusCase,
@@ -459,6 +522,7 @@ export function loadCorpus(corpusDir: string): LoadedCorpus {
   }
   const cases = dirNames.map((dirName) => loadCase(root, dirName, leafPaths));
   cases.sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
+  checkExampleLeaks(manifest, cases);
   return {
     root,
     manifest,
